@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """
 ===================================
@@ -127,6 +128,12 @@ class TrendAnalysisResult:
     rsi_status: RSIStatus = RSIStatus.NEUTRAL
     rsi_signal: str = ""              # RSI 信号描述
 
+    # KDJ 指标（标准 9/3/3）
+    kdj_k: float = 50.0
+    kdj_d: float = 50.0
+    kdj_j: float = 50.0
+    kdj_signal: str = ""              # KDJ 金叉/死叉及超买超卖描述
+
     # 买入信号
     buy_signal: BuySignal = BuySignal.WAIT
     signal_score: int = 0            # 综合评分 0-100
@@ -166,6 +173,10 @@ class TrendAnalysisResult:
             'rsi_24': self.rsi_24,
             'rsi_status': self.rsi_status.value,
             'rsi_signal': self.rsi_signal,
+            'kdj_k': self.kdj_k,
+            'kdj_d': self.kdj_d,
+            'kdj_j': self.kdj_j,
+            'kdj_signal': self.kdj_signal,
         }
 
 
@@ -180,6 +191,7 @@ class StockTrendAnalyzer:
     4. 买点识别 - 回踩 MA5/MA10 支撑
     5. MACD 指标 - 趋势确认和金叉死叉信号
     6. RSI 指标 - 超买超卖判断
+    7. KDJ 指标 - 短线动能、金叉死叉及超买超卖提示
     """
     
     # 交易参数配置（BIAS_THRESHOLD 从 Config 读取，见 _generate_signal）
@@ -198,6 +210,13 @@ class StockTrendAnalyzer:
     RSI_LONG = 24              # 长期RSI周期
     RSI_OVERBOUGHT = 70        # 超买阈值
     RSI_OVERSOLD = 30          # 超卖阈值
+
+    # KDJ 参数（标准 9/3/3）
+    KDJ_PERIOD = 9
+    KDJ_K_PERIOD = 3
+    KDJ_D_PERIOD = 3
+    KDJ_OVERBOUGHT = 80
+    KDJ_OVERSOLD = 20
     
     def __init__(self):
         """初始化分析器"""
@@ -227,9 +246,10 @@ class StockTrendAnalyzer:
         # 计算均线
         df = self._calculate_mas(df)
 
-        # 计算 MACD 和 RSI
+        # 计算 MACD、RSI 和 KDJ
         df = self._calculate_macd(df)
         df = self._calculate_rsi(df)
+        df = self._calculate_kdj(df)
 
         # 获取最新数据
         latest = df.iloc[-1]
@@ -257,7 +277,10 @@ class StockTrendAnalyzer:
         # 6. RSI 分析
         self._analyze_rsi(df, result)
 
-        # 7. 生成买入信号
+        # 7. KDJ 分析（仅作为辅助信息，不改变现有综合评分）
+        self._analyze_kdj(df, result)
+
+        # 8. 生成买入信号
         self._generate_signal(result)
 
         return result
@@ -336,6 +359,33 @@ class StockTrendAnalyzer:
             col_name = f'RSI_{period}'
             df[col_name] = rsi
 
+        return df
+
+    def _calculate_kdj(self, df: pd.DataFrame) -> pd.DataFrame:
+        """计算标准 KDJ(9,3,3) 指标。
+
+        当窗口内最高价等于最低价时 RSV 回退到 50，避免平盘数据产生
+        除零或无穷值。K、D 使用与现有告警模块一致的指数平滑口径。
+        """
+        df = df.copy()
+        lowest_low = df['low'].rolling(window=self.KDJ_PERIOD).min()
+        highest_high = df['high'].rolling(window=self.KDJ_PERIOD).max()
+        denominator = highest_high - lowest_low
+        rsv = (
+            (df['close'] - lowest_low)
+            / denominator.mask(denominator == 0)
+            * 100
+        ).fillna(50)
+
+        df['KDJ_K'] = rsv.ewm(
+            alpha=1 / self.KDJ_K_PERIOD,
+            adjust=False,
+        ).mean()
+        df['KDJ_D'] = df['KDJ_K'].ewm(
+            alpha=1 / self.KDJ_D_PERIOD,
+            adjust=False,
+        ).mean()
+        df['KDJ_J'] = 3 * df['KDJ_K'] - 2 * df['KDJ_D']
         return df
     
     def _analyze_trend(self, df: pd.DataFrame, result: TrendAnalysisResult) -> None:
@@ -582,6 +632,38 @@ class StockTrendAnalyzer:
             result.rsi_status = RSIStatus.OVERSOLD
             result.rsi_signal = f"⭐ RSI超卖({rsi_mid:.1f}<30)，反弹机会大"
 
+    def _analyze_kdj(self, df: pd.DataFrame, result: TrendAnalysisResult) -> None:
+        """提取 KDJ 数值并生成短线辅助信号，不参与综合评分。"""
+        if len(df) < self.KDJ_PERIOD + 1:
+            result.kdj_signal = "数据不足"
+            return
+
+        latest = df.iloc[-1]
+        previous = df.iloc[-2]
+        result.kdj_k = float(latest['KDJ_K'])
+        result.kdj_d = float(latest['KDJ_D'])
+        result.kdj_j = float(latest['KDJ_J'])
+
+        previous_delta = float(previous['KDJ_K'] - previous['KDJ_D'])
+        current_delta = result.kdj_k - result.kdj_d
+        golden_cross = previous_delta <= 0 < current_delta
+        death_cross = previous_delta >= 0 > current_delta
+
+        if golden_cross:
+            result.kdj_signal = "✅ K线上穿D线，形成金叉，短线动能转强"
+        elif death_cross:
+            result.kdj_signal = "⚠️ K线下穿D线，形成死叉，短线动能转弱"
+        elif result.kdj_k >= self.KDJ_OVERBOUGHT and result.kdj_d >= self.KDJ_OVERBOUGHT:
+            result.kdj_signal = "⚠️ KDJ处于超买区，注意短线回落风险"
+        elif result.kdj_k <= self.KDJ_OVERSOLD and result.kdj_d <= self.KDJ_OVERSOLD:
+            result.kdj_signal = "⭐ KDJ处于超卖区，关注止跌反弹机会"
+        elif current_delta > 0:
+            result.kdj_signal = "K线位于D线上方，短线动能偏强"
+        elif current_delta < 0:
+            result.kdj_signal = "K线位于D线下方，短线动能偏弱"
+        else:
+            result.kdj_signal = "KDJ中性，短线方向暂不明确"
+
     def _generate_signal(self, result: TrendAnalysisResult) -> None:
         """
         生成买入信号
@@ -791,6 +873,12 @@ class StockTrendAnalyzer:
             f"   RSI(12): {result.rsi_12:.1f}",
             f"   RSI(24): {result.rsi_24:.1f}",
             f"   信号: {result.rsi_signal}",
+            f"",
+            f"📉 KDJ指标(9,3,3):",
+            f"   K: {result.kdj_k:.1f}",
+            f"   D: {result.kdj_d:.1f}",
+            f"   J: {result.kdj_j:.1f}",
+            f"   信号: {result.kdj_signal}",
             f"",
             f"🎯 操作建议: {result.buy_signal.value}",
             f"   综合评分: {result.signal_score}/100",
