@@ -268,6 +268,14 @@ class CommandDispatcher:
 
         cmd_name, args = message.get_command_and_args(self.command_prefix)
         if cmd_name is None:
+            # A naked stock code is intentionally a quick quote lookup rather
+            # than an AI analysis.  This keeps group-chat exploration cheap.
+            from bot.commands.quote import is_supported_stock_code
+
+            raw_code = message.content.strip()
+            if is_supported_stock_code(raw_code):
+                cmd_name, args = "quote", [raw_code]
+        if cmd_name is None:
             return None, args, None, None
 
         logger.info(f"[Dispatcher] 收到命令: {cmd_name}, 参数: {args}, 用户: {message.user_name}")

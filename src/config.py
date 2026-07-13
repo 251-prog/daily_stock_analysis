@@ -1120,6 +1120,12 @@ class Config:
     wecom_token: Optional[str] = None               # 回调 Token
     wecom_encoding_aes_key: Optional[str] = None    # 消息加解密密钥
     wecom_agent_id: Optional[str] = None            # 应用 AgentId
+
+    # 企业微信智能机器人（API 长连接模式；适用于群内对话，不需要公网回调）
+    wecom_aibot_enabled: bool = False
+    wecom_aibot_id: Optional[str] = None
+    wecom_aibot_secret: Optional[str] = None
+    wecom_aibot_allowed_chat_ids: List[str] = field(default_factory=list)
     
     # Telegram 机器人 - 已有 telegram_bot_token, telegram_chat_id
     telegram_webhook_secret: Optional[str] = None   # Webhook 密钥
@@ -2007,6 +2013,14 @@ class Config:
             wecom_token=os.getenv('WECOM_TOKEN'),
             wecom_encoding_aes_key=os.getenv('WECOM_ENCODING_AES_KEY'),
             wecom_agent_id=os.getenv('WECOM_AGENT_ID'),
+            wecom_aibot_enabled=os.getenv('WECOM_AIBOT_ENABLED', 'false').lower() == 'true',
+            wecom_aibot_id=os.getenv('WECOM_AIBOT_ID'),
+            wecom_aibot_secret=os.getenv('WECOM_AIBOT_SECRET'),
+            wecom_aibot_allowed_chat_ids=[
+                chat_id.strip()
+                for chat_id in os.getenv('WECOM_AIBOT_ALLOWED_CHAT_IDS', '').split(',')
+                if chat_id.strip()
+            ],
             # Telegram
             telegram_webhook_secret=os.getenv('TELEGRAM_WEBHOOK_SECRET'),
             # Discord 机器人扩展配置

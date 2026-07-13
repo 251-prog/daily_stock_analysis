@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+
+- [新功能] 支持企业微信智能机器人 API 长连接：可在不开放公网回调的前提下接收群内查股和常用股管理命令。
+- [新功能] 新增无模型快速行情查询与常用股二次确认命令，避免临时查询直接扩大日报和提醒范围。
 - [新功能] 个股详细报告新增标准 KDJ(9,3,3) 的 K、D、J 数值及金叉、死叉、超买超卖提示，并将确定性结果注入传统与 Agent 分析上下文；KDJ 暂不改变现有综合评分。
 - [修复] 按股票代码删除历史记录时分批清理全部匹配项，并拒绝空白代码，避免超过 10000 条后残留记录或无筛选删除。
 - [修复] 市场结构概念排行为空或超时时复用本轮负结果，避免批量个股分析重复请求同一概念排行数据源。

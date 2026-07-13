@@ -83,6 +83,10 @@ class BotMessage:
                 '分析': 'analyze',
                 '大盘': 'market',
                 '批量': 'batch',
+                '查': 'quote',
+                '行情': 'quote',
+                '自选': 'watchlist',
+                '常用股': 'watchlist',
                 '帮助': 'help',
                 '状态': 'status',
             }

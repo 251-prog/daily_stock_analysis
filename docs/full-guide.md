@@ -991,6 +991,8 @@ crontab -e
 2. 复制 Webhook URL
 3. 设置 `WECHAT_WEBHOOK_URL`
 
+群机器人 Webhook 仅用于推送，不能接收群消息。若要在群内查询股票、并用确认命令维护常用股，请使用不需要公网回调的「智能机器人 API 长连接」方案，见 [企业微信智能机器人：群内查股](wecom-aibot.md)。
+
 ### 飞书
 
 > ⚠️ **关键区分**：`FEISHU_WEBHOOK_SECRET`（Webhook 签名密钥）和 `FEISHU_APP_SECRET`（飞书应用 Secret）是两个完全不同的配置，不能互换。

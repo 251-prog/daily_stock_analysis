@@ -35,7 +35,7 @@ class AnalyzeCommand(BotCommand):
     
     @property
     def aliases(self) -> List[str]:
-        return ["a", "分析", "查"]
+        return ["a", "分析"]
     
     @property
     def description(self) -> str:

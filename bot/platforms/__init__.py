@@ -53,6 +53,20 @@ except ImportError:
     get_feishu_stream_client = lambda: None
     start_feishu_stream_background = lambda: False
 
+# 企业微信智能机器人 API 模式（可选，使用 WebSocket 长连接）
+try:
+    from bot.platforms.wecom_aibot import (
+        WeComAiBotClient,
+        get_wecom_aibot_client,
+        start_wecom_aibot_background,
+        WECOM_AIBOT_SDK_AVAILABLE,
+    )
+except ImportError:
+    WECOM_AIBOT_SDK_AVAILABLE = False
+    WeComAiBotClient = None
+    get_wecom_aibot_client = lambda: None
+    start_wecom_aibot_background = lambda: False
+
 __all__ = [
     'BotPlatform',
     'DingtalkPlatform',
@@ -70,4 +84,9 @@ __all__ = [
     'get_feishu_stream_client',
     'start_feishu_stream_background',
     'FEISHU_SDK_AVAILABLE',
+    # 企业微信智能机器人 API 模式
+    'WeComAiBotClient',
+    'get_wecom_aibot_client',
+    'start_wecom_aibot_background',
+    'WECOM_AIBOT_SDK_AVAILABLE',
 ]
