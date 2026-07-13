@@ -13,6 +13,46 @@ from src.formatters import markdown_to_html_document
 logger = logging.getLogger(__name__)
 
 
+def _shrink_large_png(image_bytes: bytes, target_bytes: int = 1_800_000) -> bytes:
+    """Shrink large PNGs for channels such as WeChat Work (roughly 2 MB limit)."""
+    if len(image_bytes) <= target_bytes or shutil.which("convert") is None:
+        return image_bytes
+
+    temp_dir = tempfile.mkdtemp()
+    source_path = os.path.join(temp_dir, "source.png")
+    best = image_bytes
+    try:
+        with open(source_path, "wb") as f:
+            f.write(image_bytes)
+        for index, (resize, colors) in enumerate((("70%", "256"), ("55%", "128"), ("45%", "64"))):
+            output_path = os.path.join(temp_dir, f"compressed-{index}.png")
+            result = subprocess.run(
+                [
+                    "convert", source_path, "-resize", resize, "-colors", colors,
+                    "-strip", f"PNG8:{output_path}",
+                ],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            if result.returncode != 0 or not os.path.isfile(output_path):
+                continue
+            with open(output_path, "rb") as f:
+                candidate = f.read()
+            if len(candidate) < len(best):
+                best = candidate
+            if len(best) <= target_bytes:
+                break
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("PNG compression failed: %s", exc)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    if len(best) < len(image_bytes):
+        logger.info("PNG compressed: %d -> %d bytes", len(image_bytes), len(best))
+    return best
+
+
 def _markdown_to_image_m2f(markdown_text: str) -> Optional[bytes]:
     """Use markdown-to-file when it is available."""
     if shutil.which("m2f") is None:
@@ -70,6 +110,7 @@ def _markdown_to_image_wkhtml(markdown_text: str) -> Optional[bytes]:
         }
         out = imgkit.from_string(html, False, options=options)
         if out and isinstance(out, bytes) and len(out) > 0:
+            out = _shrink_large_png(out)
             logger.info("Markdown rendered as PNG: %d bytes", len(out))
             return out
         logger.warning("imgkit.from_string returned empty or invalid result")
