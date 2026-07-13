@@ -61,7 +61,7 @@ jobs:
         if: ${{ vars.MARKDOWN_TO_IMAGE_CHANNELS != '' }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y wkhtmltopdf fonts-noto-cjk
+          sudo apt-get install -y wkhtmltopdf fonts-noto-cjk imagemagick
       
       - name: 创建必要目录
         run: |
