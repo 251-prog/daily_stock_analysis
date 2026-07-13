@@ -1038,6 +1038,67 @@ class NotificationService(
         return value
 
     @staticmethod
+    def _compact_wechat_text(value: Any, max_chars: int = 64) -> str:
+        """Return a short, single-line text fragment suitable for narrow WeChat cards."""
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple, set)):
+            value = "；".join(str(item).strip() for item in value if str(item).strip())
+        text = str(value).strip()
+        if not text or text == "N/A":
+            return ""
+
+        # LLMs sometimes return JSON-looking arrays in fields intended for display.
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        text = (
+            text.replace('"', "")
+            .replace("'", "")
+            .replace("\\n", " ")
+            .replace("\n", " ")
+            .replace("\r", " ")
+            .replace("，", "，")
+        )
+        text = " ".join(text.split())
+        return text[:max_chars].rstrip("，。；、 ") + ("…" if len(text) > max_chars else "")
+
+    def _wechat_kdj_line(self, result: AnalysisResult) -> str:
+        """Compact KDJ line for the Enterprise WeChat dashboard."""
+        values = (
+            getattr(result, "kdj_k", None),
+            getattr(result, "kdj_d", None),
+            getattr(result, "kdj_j", None),
+        )
+        if any(value is None for value in values):
+            return ""
+        try:
+            k_value, d_value, j_value = (float(value) for value in values)
+        except (TypeError, ValueError):
+            return ""
+        if not all(math.isfinite(value) for value in (k_value, d_value, j_value)):
+            return ""
+
+        signal = self._compact_wechat_text(getattr(result, "kdj_signal", ""), 26)
+        suffix = f"｜{signal}" if signal else ""
+        return f"📉 KDJ：K {k_value:.1f} / D {d_value:.1f} / J {j_value:.1f}{suffix}"
+
+    @classmethod
+    def _wechat_list_items(cls, value: Any, limit: int = 2, max_chars: int = 42) -> List[str]:
+        """Normalize list-like dashboard fields for compact WeChat display."""
+        if not value:
+            return []
+        if not isinstance(value, list):
+            value = [value]
+        items: List[str] = []
+        for item in value:
+            text = cls._compact_wechat_text(item, max_chars)
+            if text:
+                items.append(text)
+            if len(items) >= limit:
+                break
+        return items
+
+    @staticmethod
     def _phase_decision_list(value: Any) -> List[str]:
         if not isinstance(value, list):
             return []
@@ -1580,81 +1641,80 @@ class NotificationService(
                 # 股票名称
                 stock_name = self._get_display_name(result, report_language)
 
-                # 标题行：信号等级 + 股票名称
-                lines.append(f"### {signal_emoji} **{signal_text}** | {stock_name}({result.code})")
-                lines.append("")
+                # 标题行：信号等级 + 股票名称。企业微信窄屏里尽量短，不使用横向长拼接。
+                lines.append(f"### {signal_emoji} {stock_name}({result.code})")
+                lines.append(
+                    f"**{signal_text}**｜"
+                    f"{labels['score_label']} {result.sentiment_score}｜"
+                    f"{localize_trend_prediction(result.trend_prediction, report_language)}"
+                )
 
                 # 核心决策（一句话）
                 one_sentence = core.get('one_sentence', result.analysis_summary) if core else result.analysis_summary
                 if one_sentence:
-                    lines.append(f"📌 **{one_sentence[:80]}**")
-                    lines.append("")
-                signal_excerpt = self._decision_signal_excerpt(result, report_language)
-                if signal_excerpt:
-                    lines.append(signal_excerpt)
-                    lines.append("")
+                    lines.append(f"📌 {self._compact_wechat_text(one_sentence, 72)}")
+
+                kdj_line = self._wechat_kdj_line(result)
+                if kdj_line:
+                    lines.append(kdj_line)
 
                 # 重要信息区（舆情+基本面）
                 info_lines = []
 
                 # 业绩预期
                 if intel.get('earnings_outlook'):
-                    outlook = str(intel['earnings_outlook'])[:60]
+                    outlook = self._compact_wechat_text(intel['earnings_outlook'], 48)
                     info_lines.append(f"📊 {labels['earnings_outlook_label']}: {outlook}")
                 if intel.get('sentiment_summary'):
-                    sentiment = str(intel['sentiment_summary'])[:50]
+                    sentiment = self._compact_wechat_text(intel['sentiment_summary'], 48)
                     info_lines.append(f"💭 {labels['sentiment_summary_label']}: {sentiment}")
                 if info_lines:
                     lines.extend(info_lines)
-                    lines.append("")
 
                 # 风险警报（最重要，醒目显示）
                 risks = intel.get('risk_alerts', []) if intel else []
                 if risks:
-                    lines.append(f"🚨 **{labels['risk_alerts_label']}**:")
-                    for risk in risks[:2]:  # 最多显示2条
-                        risk_str = str(risk)
-                        risk_text = risk_str[:50] + "..." if len(risk_str) > 50 else risk_str
-                        lines.append(f"   • {risk_text}")
-                    lines.append("")
+                    risk_items = self._wechat_list_items(risks, limit=2, max_chars=42)
+                    if risk_items:
+                        lines.append(f"🚨 {labels['risk_alerts_label']}")
+                        for risk_text in risk_items:
+                            lines.append(f"• {risk_text}")
 
                 # 利好催化
                 catalysts = intel.get('positive_catalysts', []) if intel else []
                 if catalysts:
-                    lines.append(f"✨ **{labels['positive_catalysts_label']}**:")
-                    for cat in catalysts[:2]:  # 最多显示2条
-                        cat_str = str(cat)
-                        cat_text = cat_str[:50] + "..." if len(cat_str) > 50 else cat_str
-                        lines.append(f"   • {cat_text}")
-                    lines.append("")
+                    catalyst_items = self._wechat_list_items(catalysts, limit=1, max_chars=42)
+                    if catalyst_items:
+                        lines.append(f"✨ {labels['positive_catalysts_label']}：{catalyst_items[0]}")
 
                 # 狙击点位
                 sniper = battle.get('sniper_points', {}) if battle else {}
                 if sniper:
-                    ideal_buy = str(sniper.get('ideal_buy', ''))
-                    stop_loss = str(sniper.get('stop_loss', ''))
-                    take_profit = str(sniper.get('take_profit', ''))
-                    points = []
+                    ideal_buy = self._compact_wechat_text(
+                        self._clean_sniper_value(sniper.get('ideal_buy', '')), 36
+                    )
+                    stop_loss = self._compact_wechat_text(
+                        self._clean_sniper_value(sniper.get('stop_loss', '')), 36
+                    )
+                    take_profit = self._compact_wechat_text(
+                        self._clean_sniper_value(sniper.get('take_profit', '')), 36
+                    )
                     if ideal_buy:
-                        points.append(f"🎯{labels['ideal_buy_label']}:{ideal_buy[:15]}")
+                        lines.append(f"🎯 {labels['ideal_buy_label']}：{ideal_buy}")
                     if stop_loss:
-                        points.append(f"🛑{labels['stop_loss_label']}:{stop_loss[:15]}")
+                        lines.append(f"🛑 {labels['stop_loss_label']}：{stop_loss}")
                     if take_profit:
-                        points.append(f"🎊{labels['take_profit_label']}:{take_profit[:15]}")
-                    if points:
-                        lines.append(" | ".join(points))
-                        lines.append("")
+                        lines.append(f"🎊 {labels['take_profit_label']}：{take_profit}")
 
                 # 持仓建议
                 pos_advice = core.get('position_advice', {}) if core else {}
                 if pos_advice:
-                    no_pos = str(pos_advice.get('no_position', ''))
-                    has_pos = str(pos_advice.get('has_position', ''))
+                    no_pos = self._compact_wechat_text(pos_advice.get('no_position', ''), 50)
+                    has_pos = self._compact_wechat_text(pos_advice.get('has_position', ''), 50)
                     if no_pos:
-                        lines.append(f"🆕 {labels['no_position_label']}: {no_pos[:50]}")
+                        lines.append(f"🆕 {labels['no_position_label']}：{no_pos}")
                     if has_pos:
-                        lines.append(f"💼 {labels['has_position_label']}: {has_pos[:50]}")
-                    lines.append("")
+                        lines.append(f"💼 {labels['has_position_label']}：{has_pos}")
 
                 # 检查清单简化版
                 checklist = battle.get('action_checklist', []) if battle else []
@@ -1662,10 +1722,9 @@ class NotificationService(
                     # 只显示不通过的项目
                     failed_checks = [str(c) for c in checklist if str(c).startswith('❌') or str(c).startswith('⚠️')]
                     if failed_checks:
-                        lines.append(f"**{labels['failed_checks_heading']}**:")
-                        for check in failed_checks[:3]:
-                            lines.append(f"   {check[:40]}")
-                        lines.append("")
+                        lines.append(f"未通过：")
+                        for check in failed_checks[:2]:
+                            lines.append(f"• {self._compact_wechat_text(check, 38)}")
 
                 lines.append("---")
                 lines.append("")
