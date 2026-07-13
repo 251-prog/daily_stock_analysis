@@ -1063,7 +1063,7 @@ class NotificationService(
         return text[:max_chars].rstrip("，。；、 ") + ("…" if len(text) > max_chars else "")
 
     def _wechat_kdj_line(self, result: AnalysisResult) -> str:
-        """Compact KDJ line for the Enterprise WeChat dashboard."""
+        """Return a restrained KDJ line for the Enterprise WeChat dashboard."""
         values = (
             getattr(result, "kdj_k", None),
             getattr(result, "kdj_d", None),
@@ -1078,9 +1078,19 @@ class NotificationService(
         if not all(math.isfinite(value) for value in (k_value, d_value, j_value)):
             return ""
 
-        signal = self._compact_wechat_text(getattr(result, "kdj_signal", ""), 26)
+        signal = self._compact_wechat_text(getattr(result, "kdj_signal", ""), 24)
+        signal = signal.removeprefix("⚠️").strip()
         suffix = f"｜{signal}" if signal else ""
-        return f"📉 KDJ：K {k_value:.1f} / D {d_value:.1f} / J {j_value:.1f}{suffix}"
+        return f"KDJ：K {k_value:.1f} / D {d_value:.1f} / J {j_value:.1f}{suffix}"
+
+    @classmethod
+    def _wechat_risk_text(cls, value: Any) -> str:
+        """Remove common model-generated labels from the one displayed risk."""
+        text = cls._compact_wechat_text(value, 42)
+        for prefix in ("风险点1：", "风险点2：", "风险：", "技术面风险：", "估值风险：", "基本面风险："):
+            if text.startswith(prefix):
+                return text[len(prefix):].strip()
+        return text
 
     @classmethod
     def _wechat_list_items(cls, value: Any, limit: int = 2, max_chars: int = 42) -> List[str]:
@@ -1610,10 +1620,10 @@ class NotificationService(
         buy_count, sell_count, hold_count = self._count_display_decisions(results, report_language)
 
         lines = [
-            f"## 🎯 {report_date} {labels['dashboard_title']}",
+            f"## {report_date} 收盘研究简报",
             "",
-            f"> {len(results)} {labels['stock_unit']} | "
-            f"🟢{labels['buy_label']}:{buy_count} 🟡{labels['watch_label']}:{hold_count} 🔴{labels['sell_label']}:{sell_count}",
+            f"覆盖 {len(results)} {labels['stock_unit']}｜"
+            f"{labels['buy_label']} {buy_count}｜{labels['watch_label']} {hold_count}｜{labels['sell_label']} {sell_count}",
         ]
         self._append_market_status_line(lines, results, report_language)
 
@@ -1632,7 +1642,7 @@ class NotificationService(
                 )
         else:
             for result in sorted_results:
-                signal_text, signal_emoji, _ = self._get_signal_level(result)
+                signal_text, _, _ = self._get_signal_level(result)
                 dashboard = result.dashboard if hasattr(result, 'dashboard') and result.dashboard else {}
                 core = dashboard.get('core_conclusion', {}) if dashboard else {}
                 battle = dashboard.get('battle_plan', {}) if dashboard else {}
@@ -1641,18 +1651,18 @@ class NotificationService(
                 # 股票名称
                 stock_name = self._get_display_name(result, report_language)
 
-                # 标题行：信号等级 + 股票名称。企业微信窄屏里尽量短，不使用横向长拼接。
-                lines.append(f"### {signal_emoji} {stock_name}({result.code})")
+                # 采用固定的研究卡片结构，避免企业微信窄屏中出现长句和过多图标。
+                lines.append(f"### {stock_name} · {result.code}")
                 lines.append(
-                    f"**{signal_text}**｜"
-                    f"{labels['score_label']} {result.sentiment_score}｜"
+                    f"结论：**{signal_text}**｜"
+                    f"综合评分 {result.sentiment_score}｜"
                     f"{localize_trend_prediction(result.trend_prediction, report_language)}"
                 )
 
                 # 核心决策（一句话）：企业微信只保留最重要的提示，避免窄屏阅读断行。
                 one_sentence = core.get('one_sentence', result.analysis_summary) if core else result.analysis_summary
                 if one_sentence:
-                    lines.append(f"📌 {self._compact_wechat_text(one_sentence, 48)}")
+                    lines.append(f"观点：{self._compact_wechat_text(one_sentence, 48)}")
 
                 kdj_line = self._wechat_kdj_line(result)
                 if kdj_line:
@@ -1663,7 +1673,7 @@ class NotificationService(
                 if risks:
                     risk_items = self._wechat_list_items(risks, limit=1, max_chars=42)
                     if risk_items:
-                        lines.append(f"🚨 风险：{risk_items[0]}")
+                        lines.append(f"风险：{self._wechat_risk_text(risk_items[0])}")
 
                 # 狙击点位
                 sniper = battle.get('sniper_points', {}) if battle else {}
@@ -1678,20 +1688,17 @@ class NotificationService(
                         self._clean_sniper_value(sniper.get('take_profit', '')), 28
                     )
                     if ideal_buy:
-                        lines.append(f"🎯 {labels['ideal_buy_label']}：{ideal_buy}")
+                        lines.append(f"参考：{ideal_buy}")
                     if stop_loss:
-                        lines.append(f"🛑 {labels['stop_loss_label']}：{stop_loss}")
+                        lines.append(f"风控：{stop_loss}")
                     if take_profit:
-                        lines.append(f"🎊 {labels['take_profit_label']}：{take_profit}")
+                        lines.append(f"目标：{take_profit}")
 
                 lines.append("---")
                 lines.append("")
 
         # 底部
-        lines.append(f"*{labels['report_time_label']}: {datetime.now().strftime('%H:%M')}*")
-        models = self._collect_models_used(results)
-        if models:
-            lines.append(f"*{labels['analysis_model_label']}: {', '.join(models)}*")
+        lines.append(f"*生成于 {datetime.now().strftime('%H:%M')}｜仅供个人研究参考*")
 
         content = "\n".join(lines)
 
