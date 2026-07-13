@@ -36,11 +36,11 @@ BOT_ADMIN_USERS=你的企业微信user_id
 
 ## 启动与边界
 
-安装依赖后，以本机定时方式启动：
+安装依赖后，在常开电脑上只启动对话机器人：
 
 ```bash
 pip install -r requirements.txt
-python main.py --schedule --no-run-immediately
+python scripts/run_wecom_aibot.py
 ```
 
-不要同时让 GitHub Actions 和本机在同一时间自动执行日报，否则会重复推送并增加模型费用。确认本机连续稳定运行后，再单独决定是否关闭 Actions 的定时触发。
+这个启动方式不会执行日报任务，也不会打开任何公网端口；因此可以继续由 GitHub Actions 作为唯一的日报和群 Webhook 推送来源，不会重复通知或重复产生模型费用。关闭终端或重启电脑后，机器人会停止；稳定一周后再配置系统登录后自启动。
