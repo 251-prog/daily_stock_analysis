@@ -1,3 +1,4 @@
+
 name: 每日股票分析
 
 on:
@@ -54,6 +55,13 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
+
+      # 企业微信图文简报使用 wkhtmltoimage 渲染为单张 PNG；未启用时不安装，保持常规运行开销不变。
+      - name: 安装图文简报渲染工具
+        if: ${{ vars.MARKDOWN_TO_IMAGE_CHANNELS != '' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wkhtmltopdf fonts-noto-cjk
       
       - name: 创建必要目录
         run: |
@@ -297,6 +305,11 @@ jobs:
           # 方式一：企业微信 Webhook
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
           WECHAT_MSG_TYPE: ${{ vars.WECHAT_MSG_TYPE || secrets.WECHAT_MSG_TYPE || 'markdown' }}
+
+          # 图文简报（非敏感配置）：填写 wechat 时，企业微信将接收单张 PNG 图片。
+          MARKDOWN_TO_IMAGE_CHANNELS: ${{ vars.MARKDOWN_TO_IMAGE_CHANNELS }}
+          MARKDOWN_TO_IMAGE_MAX_CHARS: ${{ vars.MARKDOWN_TO_IMAGE_MAX_CHARS || '6000' }}
+          MD2IMG_ENGINE: ${{ vars.MD2IMG_ENGINE || 'wkhtmltoimage' }}
           
           # 方式二：飞书 Webhook
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
