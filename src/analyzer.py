@@ -1698,6 +1698,10 @@ class AnalysisResult:
     ma_analysis: str = ""  # 均线分析（多头/空头排列，金叉/死叉等）
     volume_analysis: str = ""  # 量能分析（放量/缩量，主力动向等）
     pattern_analysis: str = ""  # K线形态分析
+    kdj_k: Optional[float] = None  # KDJ(9,3,3) K值（确定性技术分析结果）
+    kdj_d: Optional[float] = None  # KDJ(9,3,3) D值
+    kdj_j: Optional[float] = None  # KDJ(9,3,3) J值
+    kdj_signal: str = ""  # KDJ 金叉/死叉及超买超卖辅助提示
 
     # ========== 基本面分析 ==========
     fundamental_analysis: str = ""  # 基本面综合分析
@@ -1758,6 +1762,10 @@ class AnalysisResult:
             'ma_analysis': self.ma_analysis,
             'volume_analysis': self.volume_analysis,
             'pattern_analysis': self.pattern_analysis,
+            'kdj_k': self.kdj_k,
+            'kdj_d': self.kdj_d,
+            'kdj_j': self.kdj_j,
+            'kdj_signal': self.kdj_signal,
             'fundamental_analysis': self.fundamental_analysis,
             'sector_position': self.sector_position,
             'company_highlights': self.company_highlights,

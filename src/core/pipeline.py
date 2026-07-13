@@ -758,6 +758,11 @@ class StockAnalysisPipeline:
                 realtime_data = enhanced_context.get('realtime', {})
                 result.current_price = realtime_data.get('price')
                 result.change_pct = realtime_data.get('change_pct')
+                if trend_result is not None:
+                    result.kdj_k = trend_result.kdj_k
+                    result.kdj_d = trend_result.kdj_d
+                    result.kdj_j = trend_result.kdj_j
+                    result.kdj_signal = trend_result.kdj_signal
 
             # Step 7.6: chip_structure fallback (Issue #589) and unavailable collapse
             if result:
@@ -954,6 +959,15 @@ class StockAnalysisPipeline:
                 'signal_score': trend_result.signal_score,
                 'signal_reasons': trend_result.signal_reasons,
                 'risk_factors': trend_result.risk_factors,
+                'kdj': {
+                    'period': self.trend_analyzer.KDJ_PERIOD,
+                    'k_period': self.trend_analyzer.KDJ_K_PERIOD,
+                    'd_period': self.trend_analyzer.KDJ_D_PERIOD,
+                    'k': trend_result.kdj_k,
+                    'd': trend_result.kdj_d,
+                    'j': trend_result.kdj_j,
+                    'signal': trend_result.kdj_signal,
+                },
             }
 
         # Issue #234：盘中分析使用实时 OHLC 与趋势 MA 覆盖 today。
@@ -1466,6 +1480,11 @@ class StockAnalysisPipeline:
                 if isinstance(realtime_data, dict):
                     result.current_price = realtime_data.get("price")
                     result.change_pct = realtime_data.get("change_pct")
+                if trend_result is not None:
+                    result.kdj_k = trend_result.kdj_k
+                    result.kdj_d = trend_result.kdj_d
+                    result.kdj_j = trend_result.kdj_j
+                    result.kdj_signal = trend_result.kdj_signal
                 action_source_advice = getattr(result, "operation_advice", None)
                 stabilize_decision_with_structure(result, trend_result, fundamental_context)
                 adjustments = apply_phase_decision_guardrails(

@@ -1,17 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-===================================
-Markdown 转图片工具模块
-===================================
-
-将 Markdown 转为 PNG 图片（用于不支持 Markdown 的通知渠道）。
-支持 wkhtmltoimage (imgkit) 与 markdown-to-file (m2f)，后者对 emoji 支持更好 (Issue #455)。
-
-Security note: imgkit passes HTML to wkhtmltoimage via stdin, not argv, so
-command injection from content is not applicable. Output is rasterized to PNG
-(no script execution). Input is from system-generated reports, not raw user
-input. Risk is considered low for the current use case.
-"""
+"""Markdown 转 PNG 图片工具，用于图片通知渠道。"""
 
 import logging
 import os
@@ -25,13 +13,50 @@ from src.formatters import markdown_to_html_document
 logger = logging.getLogger(__name__)
 
 
+def _shrink_large_png(image_bytes: bytes, target_bytes: int = 1_800_000) -> bytes:
+    """Shrink large PNGs for channels such as WeChat Work (roughly 2 MB limit)."""
+    if len(image_bytes) <= target_bytes or shutil.which("convert") is None:
+        return image_bytes
+
+    temp_dir = tempfile.mkdtemp()
+    source_path = os.path.join(temp_dir, "source.png")
+    best = image_bytes
+    try:
+        with open(source_path, "wb") as f:
+            f.write(image_bytes)
+        for index, (resize, colors) in enumerate((("70%", "256"), ("55%", "128"), ("45%", "64"))):
+            output_path = os.path.join(temp_dir, f"compressed-{index}.png")
+            result = subprocess.run(
+                [
+                    "convert", source_path, "-resize", resize, "-colors", colors,
+                    "-strip", f"PNG8:{output_path}",
+                ],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            if result.returncode != 0 or not os.path.isfile(output_path):
+                continue
+            with open(output_path, "rb") as f:
+                candidate = f.read()
+            if len(candidate) < len(best):
+                best = candidate
+            if len(best) <= target_bytes:
+                break
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("PNG compression failed: %s", exc)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    if len(best) < len(image_bytes):
+        logger.info("PNG compressed: %d -> %d bytes", len(image_bytes), len(best))
+    return best
+
+
 def _markdown_to_image_m2f(markdown_text: str) -> Optional[bytes]:
-    """Convert Markdown to PNG via markdown-to-file (m2f) CLI. Better emoji support (Issue #455)."""
+    """Use markdown-to-file when it is available."""
     if shutil.which("m2f") is None:
-        logger.warning(
-            "m2f (markdown-to-file) not found in PATH. "
-            "Install with: npm i -g markdown-to-file. Fallback to text."
-        )
+        logger.warning("m2f (markdown-to-file) not found in PATH. Fallback to text.")
         return None
 
     temp_dir = None
@@ -40,7 +65,6 @@ def _markdown_to_image_m2f(markdown_text: str) -> Optional[bytes]:
         md_path = os.path.join(temp_dir, "report.md")
         with open(md_path, "w", encoding="utf-8") as f:
             f.write(markdown_text)
-
         result = subprocess.run(
             ["m2f", md_path, "png", f"outputDirectory={temp_dir}"],
             capture_output=True,
@@ -49,31 +73,26 @@ def _markdown_to_image_m2f(markdown_text: str) -> Optional[bytes]:
         )
         png_path = os.path.join(temp_dir, "report.png")
         if result.returncode != 0 or not os.path.isfile(png_path):
-            logger.warning(
-                "m2f conversion failed: returncode=%s, stderr=%s",
-                result.returncode,
-                (result.stderr or b"").decode("utf-8", errors="replace")[:200],
-            )
+            logger.warning("m2f conversion failed: returncode=%s", result.returncode)
             return None
-
         with open(png_path, "rb") as f:
             return f.read()
     except subprocess.TimeoutExpired:
         logger.warning("m2f conversion timed out (60s)")
         return None
-    except Exception as e:
-        logger.warning("markdown_to_image (m2f) failed: %s", e)
+    except Exception as exc:
+        logger.warning("markdown_to_image (m2f) failed: %s", exc)
         return None
     finally:
         if temp_dir and os.path.isdir(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
-            except OSError as e:
-                logger.debug("Failed to remove temp dir %s: %s", temp_dir, e)
+            except OSError as exc:
+                logger.debug("Failed to remove temp dir %s: %s", temp_dir, exc)
 
 
 def _markdown_to_image_wkhtml(markdown_text: str) -> Optional[bytes]:
-    """Convert Markdown to PNG via imgkit/wkhtmltoimage."""
+    """Render Markdown via imgkit/wkhtmltoimage at a mobile-friendly resolution."""
     try:
         import imgkit
     except ImportError:
@@ -86,41 +105,29 @@ def _markdown_to_image_wkhtml(markdown_text: str) -> Optional[bytes]:
             "format": "png",
             "encoding": "UTF-8",
             "quiet": "",
+            # 企业微信图片上限约 2MB。缩放后仍适合手机阅读，且避免大图回退为文本。
+            "zoom": "0.65",
         }
         out = imgkit.from_string(html, False, options=options)
         if out and isinstance(out, bytes) and len(out) > 0:
+            out = _shrink_large_png(out)
+            logger.info("Markdown rendered as PNG: %d bytes", len(out))
             return out
         logger.warning("imgkit.from_string returned empty or invalid result")
         return None
-    except OSError as e:
-        if "wkhtmltoimage" in str(e).lower() or "wkhtmltopdf" in str(e).lower():
-            logger.debug("wkhtmltopdf/wkhtmltoimage not found: %s", e)
+    except OSError as exc:
+        if "wkhtmltoimage" in str(exc).lower() or "wkhtmltopdf" in str(exc).lower():
+            logger.debug("wkhtmltopdf/wkhtmltoimage not found: %s", exc)
         else:
-            logger.warning("imgkit/wkhtmltoimage error: %s", e)
+            logger.warning("imgkit/wkhtmltoimage error: %s", exc)
         return None
-    except Exception as e:
-        logger.warning("markdown_to_image conversion failed: %s", e)
+    except Exception as exc:
+        logger.warning("markdown_to_image conversion failed: %s", exc)
         return None
 
 
 def markdown_to_image(markdown_text: str, max_chars: int = 15000) -> Optional[bytes]:
-    """
-    Convert Markdown to PNG image bytes.
-
-    Engine is read from config.md2img_engine: wkhtmltoimage (default) or
-    markdown-to-file (better emoji support, Issue #455).
-
-    When conversion fails or dependencies unavailable, returns None so caller
-    can fall back to text sending.
-
-    Args:
-        markdown_text: Raw Markdown content.
-        max_chars: Skip conversion and return None if content exceeds this length
-            (avoids huge images). Default 15000.
-
-    Returns:
-        PNG bytes, or None if conversion fails or dependencies unavailable.
-    """
+    """Convert Markdown to a PNG image, or return ``None`` for text fallback."""
     if len(markdown_text) > max_chars:
         logger.warning(
             "Markdown content (%d chars) exceeds max_chars (%d), skipping image conversion",
@@ -128,7 +135,6 @@ def markdown_to_image(markdown_text: str, max_chars: int = 15000) -> Optional[by
             max_chars,
         )
         return None
-
     try:
         from src.config import get_config
 

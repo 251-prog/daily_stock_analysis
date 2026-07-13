@@ -17,6 +17,7 @@ A股自选股智能分析系统 - 通知层
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -886,6 +887,7 @@ class NotificationService(
                 if signal_excerpt:
                     report_lines.extend([signal_excerpt, ""])
                 self._append_market_snapshot(report_lines, result)
+                self._append_kdj_indicator(report_lines, result)
 
                 # 核心看点
                 if hasattr(result, 'key_points') and result.key_points:
@@ -1034,6 +1036,77 @@ class NotificationService(
             if value.startswith(prefix):
                 return value[len(prefix):]
         return value
+
+    @staticmethod
+    def _compact_wechat_text(value: Any, max_chars: int = 64) -> str:
+        """Return a short, single-line text fragment suitable for narrow WeChat cards."""
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple, set)):
+            value = "；".join(str(item).strip() for item in value if str(item).strip())
+        text = str(value).strip()
+        if not text or text == "N/A":
+            return ""
+
+        # LLMs sometimes return JSON-looking arrays in fields intended for display.
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        text = (
+            text.replace('"', "")
+            .replace("'", "")
+            .replace("\\n", " ")
+            .replace("\n", " ")
+            .replace("\r", " ")
+            .replace("，", "，")
+        )
+        text = " ".join(text.split())
+        return text[:max_chars].rstrip("，。；、 ") + ("…" if len(text) > max_chars else "")
+
+    def _wechat_kdj_line(self, result: AnalysisResult) -> str:
+        """Return a restrained KDJ line for the Enterprise WeChat dashboard."""
+        values = (
+            getattr(result, "kdj_k", None),
+            getattr(result, "kdj_d", None),
+            getattr(result, "kdj_j", None),
+        )
+        if any(value is None for value in values):
+            return ""
+        try:
+            k_value, d_value, j_value = (float(value) for value in values)
+        except (TypeError, ValueError):
+            return ""
+        if not all(math.isfinite(value) for value in (k_value, d_value, j_value)):
+            return ""
+
+        signal = self._compact_wechat_text(getattr(result, "kdj_signal", ""), 24)
+        signal = signal.removeprefix("⚠️").strip()
+        suffix = f"｜{signal}" if signal else ""
+        return f"KDJ：K {k_value:.1f} / D {d_value:.1f} / J {j_value:.1f}{suffix}"
+
+    @classmethod
+    def _wechat_risk_text(cls, value: Any) -> str:
+        """Remove common model-generated labels from the one displayed risk."""
+        text = cls._compact_wechat_text(value, 42)
+        for prefix in ("风险点1：", "风险点2：", "风险：", "技术面风险：", "估值风险：", "基本面风险："):
+            if text.startswith(prefix):
+                return text[len(prefix):].strip()
+        return text
+
+    @classmethod
+    def _wechat_list_items(cls, value: Any, limit: int = 2, max_chars: int = 42) -> List[str]:
+        """Normalize list-like dashboard fields for compact WeChat display."""
+        if not value:
+            return []
+        if not isinstance(value, list):
+            value = [value]
+        items: List[str] = []
+        for item in value:
+            text = cls._compact_wechat_text(item, max_chars)
+            if text:
+                items.append(text)
+            if len(items) >= limit:
+                break
+        return items
 
     @staticmethod
     def _phase_decision_list(value: Any) -> List[str]:
@@ -1317,6 +1390,7 @@ class NotificationService(
                     ])
 
                 self._append_market_snapshot(report_lines, result)
+                self._append_kdj_indicator(report_lines, result)
 
                 # ========== 数据透视 ==========
                 data_persp = dashboard.get('data_perspective', {}) if dashboard else {}
@@ -1546,10 +1620,10 @@ class NotificationService(
         buy_count, sell_count, hold_count = self._count_display_decisions(results, report_language)
 
         lines = [
-            f"## 🎯 {report_date} {labels['dashboard_title']}",
+            f"## {report_date} 收盘研究简报",
             "",
-            f"> {len(results)} {labels['stock_unit']} | "
-            f"🟢{labels['buy_label']}:{buy_count} 🟡{labels['watch_label']}:{hold_count} 🔴{labels['sell_label']}:{sell_count}",
+            f"覆盖 {len(results)} {labels['stock_unit']}｜"
+            f"{labels['buy_label']} {buy_count}｜{labels['watch_label']} {hold_count}｜{labels['sell_label']} {sell_count}",
         ]
         self._append_market_status_line(lines, results, report_language)
 
@@ -1568,7 +1642,7 @@ class NotificationService(
                 )
         else:
             for result in sorted_results:
-                signal_text, signal_emoji, _ = self._get_signal_level(result)
+                signal_text, _, _ = self._get_signal_level(result)
                 dashboard = result.dashboard if hasattr(result, 'dashboard') and result.dashboard else {}
                 core = dashboard.get('core_conclusion', {}) if dashboard else {}
                 battle = dashboard.get('battle_plan', {}) if dashboard else {}
@@ -1577,101 +1651,54 @@ class NotificationService(
                 # 股票名称
                 stock_name = self._get_display_name(result, report_language)
 
-                # 标题行：信号等级 + 股票名称
-                lines.append(f"### {signal_emoji} **{signal_text}** | {stock_name}({result.code})")
-                lines.append("")
+                # 采用固定的研究卡片结构，避免企业微信窄屏中出现长句和过多图标。
+                lines.append(f"### {stock_name} · {result.code}")
+                lines.append(
+                    f"结论：**{signal_text}**｜"
+                    f"综合评分 {result.sentiment_score}｜"
+                    f"{localize_trend_prediction(result.trend_prediction, report_language)}"
+                )
 
-                # 核心决策（一句话）
+                # 核心决策（一句话）：企业微信只保留最重要的提示，避免窄屏阅读断行。
                 one_sentence = core.get('one_sentence', result.analysis_summary) if core else result.analysis_summary
                 if one_sentence:
-                    lines.append(f"📌 **{one_sentence[:80]}**")
-                    lines.append("")
-                signal_excerpt = self._decision_signal_excerpt(result, report_language)
-                if signal_excerpt:
-                    lines.append(signal_excerpt)
-                    lines.append("")
+                    lines.append(f"观点：{self._compact_wechat_text(one_sentence, 48)}")
 
-                # 重要信息区（舆情+基本面）
-                info_lines = []
+                kdj_line = self._wechat_kdj_line(result)
+                if kdj_line:
+                    lines.append(kdj_line)
 
-                # 业绩预期
-                if intel.get('earnings_outlook'):
-                    outlook = str(intel['earnings_outlook'])[:60]
-                    info_lines.append(f"📊 {labels['earnings_outlook_label']}: {outlook}")
-                if intel.get('sentiment_summary'):
-                    sentiment = str(intel['sentiment_summary'])[:50]
-                    info_lines.append(f"💭 {labels['sentiment_summary_label']}: {sentiment}")
-                if info_lines:
-                    lines.extend(info_lines)
-                    lines.append("")
-
-                # 风险警报（最重要，醒目显示）
+                # 只保留一条首要风险；业绩、舆情、催化和检查清单在完整报告中查看。
                 risks = intel.get('risk_alerts', []) if intel else []
                 if risks:
-                    lines.append(f"🚨 **{labels['risk_alerts_label']}**:")
-                    for risk in risks[:2]:  # 最多显示2条
-                        risk_str = str(risk)
-                        risk_text = risk_str[:50] + "..." if len(risk_str) > 50 else risk_str
-                        lines.append(f"   • {risk_text}")
-                    lines.append("")
-
-                # 利好催化
-                catalysts = intel.get('positive_catalysts', []) if intel else []
-                if catalysts:
-                    lines.append(f"✨ **{labels['positive_catalysts_label']}**:")
-                    for cat in catalysts[:2]:  # 最多显示2条
-                        cat_str = str(cat)
-                        cat_text = cat_str[:50] + "..." if len(cat_str) > 50 else cat_str
-                        lines.append(f"   • {cat_text}")
-                    lines.append("")
+                    risk_items = self._wechat_list_items(risks, limit=1, max_chars=42)
+                    if risk_items:
+                        lines.append(f"风险：{self._wechat_risk_text(risk_items[0])}")
 
                 # 狙击点位
                 sniper = battle.get('sniper_points', {}) if battle else {}
                 if sniper:
-                    ideal_buy = str(sniper.get('ideal_buy', ''))
-                    stop_loss = str(sniper.get('stop_loss', ''))
-                    take_profit = str(sniper.get('take_profit', ''))
-                    points = []
+                    ideal_buy = self._compact_wechat_text(
+                        self._clean_sniper_value(sniper.get('ideal_buy', '')), 28
+                    )
+                    stop_loss = self._compact_wechat_text(
+                        self._clean_sniper_value(sniper.get('stop_loss', '')), 28
+                    )
+                    take_profit = self._compact_wechat_text(
+                        self._clean_sniper_value(sniper.get('take_profit', '')), 28
+                    )
                     if ideal_buy:
-                        points.append(f"🎯{labels['ideal_buy_label']}:{ideal_buy[:15]}")
+                        lines.append(f"参考：{ideal_buy}")
                     if stop_loss:
-                        points.append(f"🛑{labels['stop_loss_label']}:{stop_loss[:15]}")
+                        lines.append(f"风控：{stop_loss}")
                     if take_profit:
-                        points.append(f"🎊{labels['take_profit_label']}:{take_profit[:15]}")
-                    if points:
-                        lines.append(" | ".join(points))
-                        lines.append("")
-
-                # 持仓建议
-                pos_advice = core.get('position_advice', {}) if core else {}
-                if pos_advice:
-                    no_pos = str(pos_advice.get('no_position', ''))
-                    has_pos = str(pos_advice.get('has_position', ''))
-                    if no_pos:
-                        lines.append(f"🆕 {labels['no_position_label']}: {no_pos[:50]}")
-                    if has_pos:
-                        lines.append(f"💼 {labels['has_position_label']}: {has_pos[:50]}")
-                    lines.append("")
-
-                # 检查清单简化版
-                checklist = battle.get('action_checklist', []) if battle else []
-                if checklist:
-                    # 只显示不通过的项目
-                    failed_checks = [str(c) for c in checklist if str(c).startswith('❌') or str(c).startswith('⚠️')]
-                    if failed_checks:
-                        lines.append(f"**{labels['failed_checks_heading']}**:")
-                        for check in failed_checks[:3]:
-                            lines.append(f"   {check[:40]}")
-                        lines.append("")
+                        lines.append(f"目标：{take_profit}")
 
                 lines.append("---")
                 lines.append("")
 
         # 底部
-        lines.append(f"*{labels['report_time_label']}: {datetime.now().strftime('%H:%M')}*")
-        models = self._collect_models_used(results)
-        if models:
-            lines.append(f"*{labels['analysis_model_label']}: {', '.join(models)}*")
+        lines.append(f"*生成于 {datetime.now().strftime('%H:%M')}｜仅供个人研究参考*")
 
         content = "\n".join(lines)
 
@@ -1849,6 +1876,7 @@ class NotificationService(
             lines.extend([signal_excerpt, ""])
 
         self._append_market_snapshot(lines, result)
+        self._append_kdj_indicator(lines, result)
 
         # 核心决策（一句话）
         one_sentence = core.get('one_sentence', result.analysis_summary) if core else result.analysis_summary
@@ -2020,6 +2048,47 @@ class NotificationService(
                 f"{snapshot.get('turnover_rate', 'N/A')} | {display_source} |",
             ])
 
+        lines.append("")
+
+    def _append_kdj_indicator(self, lines: List[str], result: AnalysisResult) -> None:
+        """Append deterministic KDJ(9,3,3) values to every detailed report path."""
+        values = (
+            getattr(result, "kdj_k", None),
+            getattr(result, "kdj_d", None),
+            getattr(result, "kdj_j", None),
+        )
+        if any(value is None for value in values):
+            return
+
+        try:
+            k_value, d_value, j_value = (float(value) for value in values)
+        except (TypeError, ValueError):
+            return
+        if not all(math.isfinite(value) for value in (k_value, d_value, j_value)):
+            return
+
+        report_language = self._get_report_language(result)
+        heading = {
+            "zh": "KDJ指标",
+            "en": "KDJ Indicator",
+            "ko": "KDJ 지표",
+        }.get(report_language, "KDJ指标")
+        signal_label = {
+            "zh": "信号",
+            "en": "Signal",
+            "ko": "신호",
+        }.get(report_language, "信号")
+        signal = str(getattr(result, "kdj_signal", "") or "").strip()
+
+        lines.extend([
+            f"### 📉 {heading} (9,3,3)",
+            "",
+            "| K | D | J |",
+            "|---:|---:|---:|",
+            f"| {k_value:.1f} | {d_value:.1f} | {j_value:.1f} |",
+        ])
+        if signal:
+            lines.extend(["", f"**{signal_label}**：{signal}"])
         lines.append("")
 
     _CURRENCY_SUFFIX = {
