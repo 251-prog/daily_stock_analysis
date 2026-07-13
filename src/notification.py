@@ -17,6 +17,7 @@ A股自选股智能分析系统 - 通知层
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -886,6 +887,7 @@ class NotificationService(
                 if signal_excerpt:
                     report_lines.extend([signal_excerpt, ""])
                 self._append_market_snapshot(report_lines, result)
+                self._append_kdj_indicator(report_lines, result)
 
                 # 核心看点
                 if hasattr(result, 'key_points') and result.key_points:
@@ -1317,6 +1319,7 @@ class NotificationService(
                     ])
 
                 self._append_market_snapshot(report_lines, result)
+                self._append_kdj_indicator(report_lines, result)
 
                 # ========== 数据透视 ==========
                 data_persp = dashboard.get('data_perspective', {}) if dashboard else {}
@@ -1849,6 +1852,7 @@ class NotificationService(
             lines.extend([signal_excerpt, ""])
 
         self._append_market_snapshot(lines, result)
+        self._append_kdj_indicator(lines, result)
 
         # 核心决策（一句话）
         one_sentence = core.get('one_sentence', result.analysis_summary) if core else result.analysis_summary
@@ -2020,6 +2024,47 @@ class NotificationService(
                 f"{snapshot.get('turnover_rate', 'N/A')} | {display_source} |",
             ])
 
+        lines.append("")
+
+    def _append_kdj_indicator(self, lines: List[str], result: AnalysisResult) -> None:
+        """Append deterministic KDJ(9,3,3) values to every detailed report path."""
+        values = (
+            getattr(result, "kdj_k", None),
+            getattr(result, "kdj_d", None),
+            getattr(result, "kdj_j", None),
+        )
+        if any(value is None for value in values):
+            return
+
+        try:
+            k_value, d_value, j_value = (float(value) for value in values)
+        except (TypeError, ValueError):
+            return
+        if not all(math.isfinite(value) for value in (k_value, d_value, j_value)):
+            return
+
+        report_language = self._get_report_language(result)
+        heading = {
+            "zh": "KDJ指标",
+            "en": "KDJ Indicator",
+            "ko": "KDJ 지표",
+        }.get(report_language, "KDJ指标")
+        signal_label = {
+            "zh": "信号",
+            "en": "Signal",
+            "ko": "신호",
+        }.get(report_language, "信号")
+        signal = str(getattr(result, "kdj_signal", "") or "").strip()
+
+        lines.extend([
+            f"### 📉 {heading} (9,3,3)",
+            "",
+            "| K | D | J |",
+            "|---:|---:|---:|",
+            f"| {k_value:.1f} | {d_value:.1f} | {j_value:.1f} |",
+        ])
+        if signal:
+            lines.extend(["", f"**{signal_label}**：{signal}"])
         lines.append("")
 
     _CURRENCY_SUFFIX = {

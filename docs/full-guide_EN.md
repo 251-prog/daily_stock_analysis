@@ -1508,6 +1508,17 @@ python main.py --serve-only --host 0.0.0.0 --port 8888
 
 ---
 
+## KDJ In Detailed Stock Reports
+
+Detailed stock reports calculate and deterministically display the standard `KDJ(9,3,3)` K, D, and J values from daily `high` / `low` / `close` bars, together with K/D bullish-cross, bearish-cross, overbought, and oversold hints. KDJ is also added to the technical context used by both traditional and Agent analysis paths, but it remains short-term supporting information and does not change the existing composite score or action advice.
+
+- K and D both at or above 80: overbought hint.
+- K and D both at or below 20: oversold hint.
+- K crossing above D: bullish cross; K crossing below D: bearish cross.
+- When the rolling high equals the rolling low, RSV uses the neutral value 50 to avoid division by zero.
+
+KDJ is more sensitive in range-bound markets and can remain saturated during strong trends, so it should be read together with moving averages, MACD, volume, and risk information.
+
 ## FAQ
 
 ### Q: Push messages getting truncated?
