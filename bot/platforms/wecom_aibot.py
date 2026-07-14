@@ -13,6 +13,7 @@ import logging
 import re
 import threading
 import uuid
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -190,6 +191,25 @@ class WeComAiBotClient:
                 "markdown": {"content": content},
             },
         )
+
+    def send_markdown_threadsafe(self, chat_id: str, content: str) -> bool:
+        """Send proactive Markdown safely from a monitor/background thread."""
+        if not self._running or not self._loop or not self._loop.is_running() or not self._client:
+            logger.warning("[WeCom AI Bot] 长连接尚未就绪，主动消息未发送")
+            return False
+        future = asyncio.run_coroutine_threadsafe(
+            self._send_proactive_markdown(chat_id, content), self._loop
+        )
+        try:
+            future.result(timeout=15)
+            return True
+        except FutureTimeoutError:
+            future.cancel()
+            logger.warning("[WeCom AI Bot] 主动消息发送超时")
+            return False
+        except Exception as exc:
+            logger.warning("[WeCom AI Bot] 主动消息发送失败: %s", exc)
+            return False
 
     async def _watch_analysis_task(
         self,

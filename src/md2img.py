@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def _shrink_large_png(image_bytes: bytes, target_bytes: int = 1_800_000) -> bytes:
-    """Shrink large PNGs for channels such as WeChat Work (roughly 2 MB limit)."""
+    """Shrink a PNG while preserving readable text and pixel dimensions first."""
     if len(image_bytes) <= target_bytes or shutil.which("convert") is None:
         return image_bytes
 
@@ -24,13 +24,22 @@ def _shrink_large_png(image_bytes: bytes, target_bytes: int = 1_800_000) -> byte
     try:
         with open(source_path, "wb") as f:
             f.write(image_bytes)
-        for index, (resize, colors) in enumerate((("70%", "256"), ("55%", "128"), ("45%", "64"))):
+        # Text posters compress well with indexed colour. Try full-size
+        # quantization before any resize; only resize gently as a last resort.
+        attempts = (
+            (None, "256"),
+            (None, "128"),
+            ("90%", "128"),
+            ("80%", "96"),
+        )
+        for index, (resize, colors) in enumerate(attempts):
             output_path = os.path.join(temp_dir, f"compressed-{index}.png")
+            command = ["convert", source_path]
+            if resize:
+                command.extend(["-resize", resize])
+            command.extend(["-colors", colors, "-strip", f"PNG8:{output_path}"])
             result = subprocess.run(
-                [
-                    "convert", source_path, "-resize", resize, "-colors", colors,
-                    "-strip", f"PNG8:{output_path}",
-                ],
+                command,
                 capture_output=True,
                 timeout=30,
                 check=False,
@@ -51,6 +60,27 @@ def _shrink_large_png(image_bytes: bytes, target_bytes: int = 1_800_000) -> byte
     if len(best) < len(image_bytes):
         logger.info("PNG compressed: %d -> %d bytes", len(image_bytes), len(best))
     return best
+
+
+def _image_html_document(markdown_text: str) -> str:
+    """Return report HTML with high-resolution poster-specific typography."""
+    html = markdown_to_html_document(markdown_text)
+    image_css = """
+        body {
+            font-size: 20px !important;
+            line-height: 1.62 !important;
+            max-width: 1120px !important;
+            padding: 34px 40px !important;
+            background: #ffffff !important;
+        }
+        h1 { font-size: 32px !important; }
+        h2 { font-size: 28px !important; }
+        h3 { font-size: 24px !important; }
+        table { font-size: 18px !important; }
+        th, td { padding: 10px 14px !important; }
+        p, li { letter-spacing: 0.01em; }
+    """
+    return html.replace("</style>", f"{image_css}</style>", 1)
 
 
 def _markdown_to_image_m2f(markdown_text: str) -> Optional[bytes]:
@@ -99,14 +129,17 @@ def _markdown_to_image_wkhtml(markdown_text: str) -> Optional[bytes]:
         logger.debug("imgkit not installed, markdown_to_image unavailable")
         return None
 
-    html = markdown_to_html_document(markdown_text)
+    html = _image_html_document(markdown_text)
     try:
         options = {
             "format": "png",
             "encoding": "UTF-8",
             "quiet": "",
-            # 企业微信图片上限约 2MB。缩放后仍适合手机阅读，且避免大图回退为文本。
-            "zoom": "0.65",
+            # Render at poster resolution. Compression below preserves these
+            # pixels before considering a small resize for WeCom's size limit.
+            "width": "1280",
+            "zoom": "1.0",
+            "disable-smart-width": "",
         }
         out = imgkit.from_string(html, False, options=options)
         if out and isinstance(out, bytes) and len(out) > 0:

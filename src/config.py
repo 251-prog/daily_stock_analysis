@@ -1126,6 +1126,9 @@ class Config:
     wecom_aibot_id: Optional[str] = None
     wecom_aibot_secret: Optional[str] = None
     wecom_aibot_allowed_chat_ids: List[str] = field(default_factory=list)
+    wecom_watchlist_monitor_enabled: bool = False
+    wecom_watchlist_monitor_interval_minutes: int = 5
+    wecom_watchlist_move_alert_pct: float = 5.0
     
     # Telegram 机器人 - 已有 telegram_bot_token, telegram_chat_id
     telegram_webhook_secret: Optional[str] = None   # Webhook 密钥
@@ -2021,6 +2024,23 @@ class Config:
                 for chat_id in os.getenv('WECOM_AIBOT_ALLOWED_CHAT_IDS', '').split(',')
                 if chat_id.strip()
             ],
+            wecom_watchlist_monitor_enabled=os.getenv(
+                'WECOM_WATCHLIST_MONITOR_ENABLED', 'false'
+            ).lower() == 'true',
+            wecom_watchlist_monitor_interval_minutes=parse_env_int(
+                os.getenv('WECOM_WATCHLIST_MONITOR_INTERVAL_MINUTES'),
+                5,
+                field_name='WECOM_WATCHLIST_MONITOR_INTERVAL_MINUTES',
+                minimum=1,
+                maximum=60,
+            ),
+            wecom_watchlist_move_alert_pct=parse_env_float(
+                os.getenv('WECOM_WATCHLIST_MOVE_ALERT_PCT'),
+                5.0,
+                field_name='WECOM_WATCHLIST_MOVE_ALERT_PCT',
+                minimum=1.0,
+                maximum=20.0,
+            ),
             # Telegram
             telegram_webhook_secret=os.getenv('TELEGRAM_WEBHOOK_SECRET'),
             # Discord 机器人扩展配置

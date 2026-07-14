@@ -58,7 +58,7 @@ class ChatCommand(BotCommand):
         
     @property
     def description(self) -> str:
-        return "与 AI 助手进行自由对话 (需开启 Agent 模式)"
+        return "股票研究自由问答（默认轻量模式）"
         
     @property
     def usage(self) -> str:
@@ -78,11 +78,6 @@ class ChatCommand(BotCommand):
         """Execute the chat command."""
         config = get_config()
 
-        if not config.agent_mode:
-            return BotResponse.text_response(
-                "⚠️ Agent 模式未开启，无法使用对话功能。\n请在配置中设置 `AGENT_MODE=true`。"
-            )
-            
         if not args:
             return BotResponse.text_response(
                 "⚠️ 请提供要询问的问题。\n用法: `/chat <问题>`\n示例: `/chat 帮我分析一下茅台最近的走势`"
@@ -90,6 +85,28 @@ class ChatCommand(BotCommand):
             
         user_message = " ".join(args)
         session_id = _resolve_chat_session_id(message)
+
+        if not config.agent_mode:
+            stock_code = str(
+                (message.raw_data or {}).get("lightweight_stock_code") or ""
+            ).strip() or None
+            try:
+                from src.services.lightweight_stock_qa_service import (
+                    LightweightStockQaService,
+                )
+
+                answer = LightweightStockQaService().answer(
+                    question=user_message,
+                    session_id=session_id,
+                    stock_code=stock_code,
+                    config=config,
+                )
+                return BotResponse.markdown_response(answer)
+            except Exception as exc:
+                logger.error("Lightweight stock Q&A failed: %s", exc)
+                return BotResponse.text_response(
+                    "⚠️ 暂时无法完成这次问答。行情或模型服务可能正在重试，请稍后再问。"
+                )
         
         try:
             from src.agent.factory import build_agent_executor

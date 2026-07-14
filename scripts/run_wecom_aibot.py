@@ -37,11 +37,24 @@ def main() -> int:
         return 2
 
     client = get_wecom_aibot_client()
+    monitor = None
+    if client and getattr(config, "wecom_watchlist_monitor_enabled", False):
+        if not getattr(config, "wecom_aibot_allowed_chat_ids", []):
+            logging.error(
+                "盘中提醒需要 WECOM_AIBOT_ALLOWED_CHAT_IDS；当前未配置，监控未启动。"
+            )
+        else:
+            from src.services.wecom_watchlist_monitor import WeComWatchlistMonitor
+
+            monitor = WeComWatchlistMonitor(config, client.send_markdown_threadsafe)
+            monitor.start_background()
     stopping = False
 
     def _stop(_signum: int, _frame: object) -> None:
         nonlocal stopping
         stopping = True
+        if monitor:
+            monitor.stop()
         if client:
             client.stop()
 
@@ -52,6 +65,8 @@ def main() -> int:
         while not stopping:
             time.sleep(1)
     finally:
+        if monitor:
+            monitor.stop()
         if client:
             client.stop()
     return 0
