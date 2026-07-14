@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -103,6 +104,20 @@ class WeComAiBotClient:
             return False
         return True
 
+    async def _reply_text(self, frame: Dict[str, Any], content: str) -> None:
+        """Reply using the intelligent-bot stream message type.
+
+        ``text`` and ``markdown`` are valid for welcome or proactive-message
+        APIs, but normal message callbacks require a ``stream`` response.
+        A completed one-shot stream works for both plain text and Markdown.
+        """
+        await self._client.reply_stream(
+            frame,
+            stream_id=f"dsa-{uuid.uuid4().hex}",
+            content=content,
+            finish=True,
+        )
+
     async def _handle_text(self, frame: Dict[str, Any]) -> None:
         message = self._frame_to_message(frame)
         if message is None or not self._is_allowed(message):
@@ -114,18 +129,11 @@ class WeComAiBotClient:
             response = await get_dispatcher().dispatch_async(message)
             if not response.text:
                 return
-            if response.markdown:
-                body = {"msgtype": "markdown", "markdown": {"content": response.text}}
-            else:
-                body = {"msgtype": "text", "text": {"content": response.text}}
-            await self._client.reply(frame, body)
+            await self._reply_text(frame, response.text)
         except Exception as exc:
             logger.exception("[WeCom AI Bot] 消息处理失败: %s", exc)
             try:
-                await self._client.reply(
-                    frame,
-                    {"msgtype": "text", "text": {"content": "暂时无法处理这条消息，请稍后再试。"}},
-                )
+                await self._reply_text(frame, "暂时无法处理这条消息，请稍后再试。")
             except Exception:
                 logger.exception("[WeCom AI Bot] 发送失败提示时发生异常")
 

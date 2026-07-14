@@ -54,6 +54,7 @@ fake-useragent>=1.4.0       # Random User-Agent support
 httpx[socks]                # HTTP client with SOCKS proxy support; optional OpenAI dependency
 dingtalk-stream >= 0.24.3    # DingTalk Stream SDK
 wecom-aibot-sdk==1.0.8        # Optional: Enterprise WeChat intelligent bot long connection
+python-socks[asyncio]>=2.4,<3 # SOCKS proxy support used by the WeCom WebSocket client
 # Database
 # SQLite is built into Python and does not need an extra package
 
