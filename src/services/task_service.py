@@ -206,6 +206,14 @@ class TaskService:
                     "operation_advice": result.operation_advice,
                     "trend_prediction": result.trend_prediction,
                     "analysis_summary": result.analysis_summary,
+                    "buy_reason": result.buy_reason,
+                    "technical_analysis": result.technical_analysis,
+                    "news_summary": result.news_summary,
+                    "risk_warning": result.risk_warning,
+                    "kdj_k": result.kdj_k,
+                    "kdj_d": result.kdj_d,
+                    "kdj_j": result.kdj_j,
+                    "kdj_signal": result.kdj_signal,
                 }
 
                 with self._tasks_lock:

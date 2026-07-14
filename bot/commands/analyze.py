@@ -91,13 +91,19 @@ class AnalyzeCommand(BotCommand):
             
             if result.get("success"):
                 task_id = result.get("task_id", "")
-                return BotResponse.markdown_response(
+                response = BotResponse.markdown_response(
                     f"✅ **分析任务已提交**\n\n"
                     f"• 股票代码: `{code}`\n"
                     f"• 报告类型: {ReportType.from_str(report_type).display_name}\n"
                     f"• 任务 ID: `{task_id[:20]}...`\n\n"
                     f"分析完成后将自动推送结果。"
                 )
+                # Platform adapters can use this neutral metadata to deliver a
+                # follow-up after the asynchronous task finishes.  Keeping the
+                # command itself platform-agnostic avoids coupling the analysis
+                # service to Enterprise WeChat.
+                response.extra["analysis_task_id"] = task_id
+                return response
             else:
                 error = result.get("error", "未知错误")
                 return BotResponse.error_response(f"提交分析任务失败: {error}")
