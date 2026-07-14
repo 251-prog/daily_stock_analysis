@@ -185,7 +185,10 @@ class WeComAiBotClient:
         """Send a message after the original callback window has expired."""
         await self._client.send_message(
             chat_id,
-            {"markdown": {"content": content}},
+            {
+                "msgtype": "markdown",
+                "markdown": {"content": content},
+            },
         )
 
     async def _watch_analysis_task(

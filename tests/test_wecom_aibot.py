@@ -126,4 +126,5 @@ async def test_wecom_aibot_proactively_sends_completed_analysis(monkeypatch) -> 
     client._client.send_message.assert_awaited_once()
     args, _ = client._client.send_message.await_args
     assert args[0] == "group-1"
+    assert args[1]["msgtype"] == "markdown"
     assert "利通电子" in args[1]["markdown"]["content"]
