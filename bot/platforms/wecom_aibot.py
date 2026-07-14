@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 import uuid
 from datetime import datetime
@@ -18,6 +19,7 @@ from typing import Any, Dict, Optional
 from bot.models import BotMessage, ChatType, Platform
 
 logger = logging.getLogger(__name__)
+_LEADING_MENTION_RE = re.compile(r"^\s*@\S+\s+")
 
 try:
     from wecom_aibot_sdk import WSClient
@@ -61,6 +63,13 @@ class WeComAiBotClient:
         text = ((body.get("text") or {}).get("content") or "").strip()
         if not text:
             return None
+
+        # Group callbacks may retain the visible ``@机器人`` prefix in
+        # ``text.content``.  The dispatcher must see only the user's command;
+        # otherwise a bare stock code falls through to the help response.
+        text_without_mention = _LEADING_MENTION_RE.sub("", text, count=1).strip()
+        if text_without_mention:
+            text = text_without_mention
 
         sender = body.get("from") or {}
         user_id = str(sender.get("userid") or sender.get("user_id") or "")

@@ -30,6 +30,23 @@ def test_wecom_aibot_parses_group_text_frame() -> None:
     assert message.content == "600519"
 
 
+def test_wecom_aibot_strips_leading_group_mention() -> None:
+    message = WeComAiBotClient._frame_to_message(
+        {
+            "body": {
+                "msgid": "message-2",
+                "chatid": "group-1",
+                "chattype": "group",
+                "from": {"userid": "user-1"},
+                "text": {"content": "@股票研究助手 603629"},
+            }
+        }
+    )
+
+    assert message is not None
+    assert message.content == "603629"
+
+
 def test_wecom_aibot_ignores_non_text_frame() -> None:
     assert WeComAiBotClient._frame_to_message({"body": {"image": {"url": "x"}}}) is None
 
