@@ -120,6 +120,37 @@ class CommandDispatcher:
 
         # 回调函数：获取帮助命令的命令列表
         self._help_command_getter: Optional[Callable] = None
+        self._last_stock_by_scope: Dict[tuple[str, str, str], str] = {}
+
+    _A_SHARE_IN_TEXT = re.compile(
+        r"(?<!\d)((?:[036]\d{5}|(?:43|83|87|88|92)\d{4}))(?!\d)"
+    )
+    _ANNOUNCEMENT_QUESTION = re.compile(
+        r"公告|新闻|消息|业绩|财报|预告|快报|净利润"
+    )
+
+    @staticmethod
+    def _context_scope(message: BotMessage) -> tuple[str, str, str]:
+        return (message.platform, message.user_id, message.chat_id or "")
+
+    def _remember_explicit_stock(self, message: BotMessage) -> Optional[str]:
+        match = self._A_SHARE_IN_TEXT.search(message.content or "")
+        if not match:
+            return None
+        code = match.group(1)
+        self._last_stock_by_scope[self._context_scope(message)] = code
+        return code
+
+    def _resolve_lightweight_announcement_route(
+        self, message: BotMessage, explicit_code: Optional[str]
+    ) -> Optional[tuple[str, List[str]]]:
+        text = message.content or ""
+        if not self._ANNOUNCEMENT_QUESTION.search(text):
+            return None
+        code = explicit_code or self._last_stock_by_scope.get(self._context_scope(message))
+        if not code:
+            return None
+        return "announcements", [code]
 
     def register(self, command: BotCommand) -> None:
         """
@@ -266,6 +297,7 @@ class CommandDispatcher:
                 f"请求过于频繁，请 {remaining_time} 秒后再试"
             )
 
+        explicit_code = self._remember_explicit_stock(message)
         cmd_name, args = message.get_command_and_args(self.command_prefix)
         if cmd_name is None:
             # A naked stock code is intentionally a quick quote lookup rather
@@ -275,6 +307,12 @@ class CommandDispatcher:
             raw_code = message.content.strip()
             if is_supported_stock_code(raw_code):
                 cmd_name, args = "quote", [raw_code]
+        if cmd_name is None:
+            announcement_route = self._resolve_lightweight_announcement_route(
+                message, explicit_code
+            )
+            if announcement_route is not None:
+                cmd_name, args = announcement_route
         if cmd_name is None:
             return None, args, None, None
 

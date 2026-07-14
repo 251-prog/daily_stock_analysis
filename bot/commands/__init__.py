@@ -20,6 +20,7 @@ from bot.commands.strategies import StrategiesCommand
 from bot.commands.history import HistoryCommand
 from bot.commands.quote import QuoteCommand
 from bot.commands.watchlist import WatchlistCommand
+from bot.commands.announcements import AnnouncementsCommand
 
 # All available commands (for auto-registration)
 ALL_COMMANDS = [
@@ -35,6 +36,7 @@ ALL_COMMANDS = [
     HistoryCommand,
     QuoteCommand,
     WatchlistCommand,
+    AnnouncementsCommand,
 ]
 
 __all__ = [
@@ -51,5 +53,6 @@ __all__ = [
     'HistoryCommand',
     'QuoteCommand',
     'WatchlistCommand',
+    'AnnouncementsCommand',
     'ALL_COMMANDS',
 ]

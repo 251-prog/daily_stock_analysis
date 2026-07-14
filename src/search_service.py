@@ -4052,6 +4052,58 @@ class SearchService:
                     'strict_freshness': False,
                 },
             ]
+
+        # A-share company announcements are primary decision inputs.  Query a
+        # dedicated filing endpoint before general web search so an after-hours
+        # filing is not lost when SearXNG is blocked or its formal notice date is
+        # the next calendar day.
+        if not is_foreign and not is_index_etf and re.fullmatch(r"\d{6}", stock_code):
+            try:
+                from src.services.announcement_service import AnnouncementService
+
+                direct_items = AnnouncementService().get_recent(
+                    stock_code,
+                    days=self._effective_news_window_days(),
+                    limit=3,
+                    include_content=True,
+                )
+                if direct_items:
+                    direct_results = [
+                        SearchResult(
+                            title=item.get("title") or f"{stock_name} 公司公告",
+                            snippet=item.get("summary") or item.get("title") or "",
+                            url=item.get("url") or "",
+                            source="公司公告直连",
+                            published_date=(item.get("display_time") or item.get("notice_date") or "")[:10],
+                            relevance_score=100,
+                            relevance_category="direct_stock",
+                            relevance_reasons=["股票代码直接命中", "上市公司公告"],
+                        )
+                        for item in direct_items
+                    ]
+                    results["announcements"] = SearchResponse(
+                        query=f"{stock_name} {stock_code} 公司公告",
+                        results=direct_results,
+                        provider="CompanyAnnouncementAPI",
+                        success=True,
+                    )
+                    earnings_results = [
+                        result
+                        for result in direct_results
+                        if any(
+                            keyword in result.title
+                            for keyword in ("业绩", "年报", "半年报", "季报")
+                        )
+                    ]
+                    if earnings_results:
+                        results["earnings"] = SearchResponse(
+                            query=f"{stock_name} {stock_code} 业绩公告",
+                            results=earnings_results,
+                            provider="CompanyAnnouncementAPI",
+                            success=True,
+                        )
+            except Exception as exc:
+                logger.warning("[公司公告直连] %s(%s) 查询失败: %s", stock_name, stock_code, exc)
         
         search_days = self._effective_news_window_days()
         target_per_dimension = 3
@@ -4077,6 +4129,9 @@ class SearchService:
         for dim in search_dimensions:
             if search_count >= max_searches:
                 break
+
+            if dim['name'] in results:
+                continue
             
             # 选择搜索引擎（轮流使用）
             available_providers = [p for p in self._providers if p.is_available]
