@@ -1129,6 +1129,8 @@ class Config:
     wecom_watchlist_monitor_enabled: bool = False
     wecom_watchlist_monitor_interval_minutes: int = 5
     wecom_watchlist_move_alert_pct: float = 5.0
+    wecom_closing_brief_enabled: bool = False
+    wecom_closing_brief_time: str = "14:30"
     
     # Telegram 机器人 - 已有 telegram_bot_token, telegram_chat_id
     telegram_webhook_secret: Optional[str] = None   # Webhook 密钥
@@ -2040,6 +2042,12 @@ class Config:
                 field_name='WECOM_WATCHLIST_MOVE_ALERT_PCT',
                 minimum=1.0,
                 maximum=20.0,
+            ),
+            wecom_closing_brief_enabled=os.getenv(
+                'WECOM_CLOSING_BRIEF_ENABLED', 'false'
+            ).lower() == 'true',
+            wecom_closing_brief_time=(
+                os.getenv('WECOM_CLOSING_BRIEF_TIME', '14:30').strip() or '14:30'
             ),
             # Telegram
             telegram_webhook_secret=os.getenv('TELEGRAM_WEBHOOK_SECRET'),
