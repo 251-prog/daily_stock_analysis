@@ -1664,6 +1664,11 @@ class NotificationService(
                 if one_sentence:
                     lines.append(f"观点：{self._compact_wechat_text(one_sentence, 48)}")
 
+                # 完整模式保留结构化决策依据，避免海报只剩结论而缺少分析思路。
+                signal_excerpt = self._decision_signal_excerpt(result, report_language)
+                if signal_excerpt:
+                    lines.append(signal_excerpt)
+
                 kdj_line = self._wechat_kdj_line(result)
                 if kdj_line:
                     lines.append(kdj_line)

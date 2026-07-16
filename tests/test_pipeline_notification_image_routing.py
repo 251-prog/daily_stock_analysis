@@ -164,7 +164,9 @@ class TestPipelineWechatOnlyImageRouting(unittest.TestCase):
         pipeline.config = SimpleNamespace(stock_email_groups=[])
         results = [SimpleNamespace(code="000001")]
 
-        with patch("src.md2img.markdown_to_image", return_value=b"wechat-image") as mock_md2img:
+        with patch(
+            "src.md2img.markdown_to_image_cards", return_value=[b"wechat-image"]
+        ) as mock_md2img:
             pipeline._send_notifications(results, ReportType.SIMPLE)
 
         mock_md2img.assert_called_once_with(
@@ -179,7 +181,7 @@ class TestPipelineWechatOnlyImageRouting(unittest.TestCase):
         pipeline.config = SimpleNamespace(stock_email_groups=[])
         results = [SimpleNamespace(code="000001")]
 
-        with patch("src.md2img.markdown_to_image", return_value=None), patch(
+        with patch("src.md2img.markdown_to_image_cards", return_value=[]), patch(
             "src.core.pipeline.get_config", return_value=SimpleNamespace(md2img_engine="wkhtmltoimage")
         ), patch("src.core.pipeline.logger.warning") as mock_warning:
             pipeline._send_notifications(results, ReportType.SIMPLE)
@@ -189,6 +191,22 @@ class TestPipelineWechatOnlyImageRouting(unittest.TestCase):
         self.assertTrue(
             any("企业微信 Markdown 转图片失败" in str(call.args[0]) for call in mock_warning.call_args_list)
         )
+
+    def test_send_notifications_wechat_sends_each_rendered_stock_card(self):
+        pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
+        pipeline.notifier = _FakeWechatNotifier()
+        pipeline.config = SimpleNamespace(stock_email_groups=[])
+        results = [SimpleNamespace(code="000001"), SimpleNamespace(code="600519")]
+
+        with patch(
+            "src.md2img.markdown_to_image_cards",
+            return_value=[b"stock-one", b"stock-two"],
+        ):
+            pipeline._send_notifications(results, ReportType.SIMPLE)
+
+        self.assertEqual(pipeline.notifier._send_wechat_image.call_count, 2)
+        pipeline.notifier._send_wechat_image.assert_any_call(b"stock-one")
+        pipeline.notifier._send_wechat_image.assert_any_call(b"stock-two")
 
 
 class _FakeRoutedNotifier:

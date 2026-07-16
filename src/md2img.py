@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from typing import Optional
+from typing import List, Optional
 
 from src.formatters import markdown_to_html_document
 
@@ -29,6 +29,7 @@ def _shrink_large_png(image_bytes: bytes, target_bytes: int = 1_800_000) -> byte
         attempts = (
             (None, "256"),
             (None, "128"),
+            (None, "64"),
             ("90%", "128"),
             ("80%", "96"),
         )
@@ -67,16 +68,16 @@ def _image_html_document(markdown_text: str) -> str:
     html = markdown_to_html_document(markdown_text)
     image_css = """
         body {
-            font-size: 20px !important;
+            font-size: 24px !important;
             line-height: 1.62 !important;
             max-width: 1120px !important;
             padding: 34px 40px !important;
             background: #ffffff !important;
         }
-        h1 { font-size: 32px !important; }
-        h2 { font-size: 28px !important; }
-        h3 { font-size: 24px !important; }
-        table { font-size: 18px !important; }
+        h1 { font-size: 40px !important; }
+        h2 { font-size: 34px !important; }
+        h3 { font-size: 30px !important; }
+        table { font-size: 22px !important; }
         th, td { padding: 10px 14px !important; }
         p, li { letter-spacing: 0.01em; }
     """
@@ -137,8 +138,8 @@ def _markdown_to_image_wkhtml(markdown_text: str) -> Optional[bytes]:
             "quiet": "",
             # Render at poster resolution. Compression below preserves these
             # pixels before considering a small resize for WeCom's size limit.
-            "width": "1280",
-            "zoom": "1.0",
+            "width": "1920",
+            "zoom": "1.5",
             "disable-smart-width": "",
         }
         out = imgkit.from_string(html, False, options=options)
@@ -178,3 +179,56 @@ def markdown_to_image(markdown_text: str, max_chars: int = 15000) -> Optional[by
     if engine == "markdown-to-file":
         return _markdown_to_image_m2f(markdown_text)
     return _markdown_to_image_wkhtml(markdown_text)
+
+
+def split_markdown_stock_cards(markdown_text: str) -> List[str]:
+    """Split a WeCom dashboard into one readable card per stock heading.
+
+    The shared report header and footer are repeated so each image remains
+    understandable when viewed independently in a chat timeline.
+    """
+    lines = markdown_text.splitlines()
+    heading_indexes = [
+        index for index, line in enumerate(lines)
+        if line.startswith("### ")
+    ]
+    if len(heading_indexes) <= 1:
+        return [markdown_text]
+
+    footer_index = len(lines)
+    for index in range(heading_indexes[-1] + 1, len(lines)):
+        stripped = lines[index].strip()
+        if stripped.startswith("*生成于 ") or stripped.startswith("*Generated at "):
+            footer_index = index
+            break
+
+    preamble = lines[:heading_indexes[0]]
+    footer = lines[footer_index:]
+    cards: List[str] = []
+    for position, start in enumerate(heading_indexes):
+        end = (
+            heading_indexes[position + 1]
+            if position + 1 < len(heading_indexes)
+            else footer_index
+        )
+        section = lines[start:end]
+        card_lines = [*preamble, *section]
+        if footer:
+            card_lines.extend(footer)
+        cards.append("\n".join(card_lines).strip())
+    return cards
+
+
+def markdown_to_image_cards(markdown_text: str, max_chars: int = 15000) -> List[bytes]:
+    """Render one or more high-resolution stock cards.
+
+    Returning an empty list signals callers to use their existing text
+    fallback. All cards must render successfully to avoid partial reports.
+    """
+    images: List[bytes] = []
+    for card in split_markdown_stock_cards(markdown_text):
+        image = markdown_to_image(card, max_chars=max_chars)
+        if image is None:
+            return []
+        images.append(image)
+    return images
