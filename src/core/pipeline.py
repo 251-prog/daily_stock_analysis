@@ -3378,7 +3378,7 @@ class StockAnalysisPipeline:
                         return
 
                 # Issue #455: Markdown 转图片（与 notification.send 逻辑一致）
-                from src.md2img import markdown_to_image
+                from src.md2img import markdown_to_image, markdown_to_image_cards
 
                 channels_needing_image = {
                     ch for ch in channels
@@ -3425,22 +3425,31 @@ class StockAnalysisPipeline:
                             dashboard_content = self.notifier.generate_wechat_dashboard(results)
                         logger.info(f"企业微信仪表盘长度: {len(dashboard_content)} 字符")
                         logger.debug(f"企业微信推送内容:\n{dashboard_content}")
-                        wechat_image_bytes = None
+                        wechat_image_cards = []
                         if NotificationChannel.WECHAT in channels_needing_image:
-                            wechat_image_bytes = markdown_to_image(
+                            wechat_image_cards = markdown_to_image_cards(
                                 dashboard_content,
                                 max_chars=self.notifier._markdown_to_image_max_chars,
                             )
-                            if wechat_image_bytes is None:
+                            if not wechat_image_cards:
                                 logger.warning(
                                     "企业微信 Markdown 转图片失败，将回退为文本发送。请检查 MARKDOWN_TO_IMAGE_CHANNELS 配置并安装 %s",
                                     _get_md2img_hint(),
                                 )
-                        use_image = self.notifier._should_use_image_for_channel(
-                            NotificationChannel.WECHAT, wechat_image_bytes
-                        )
-                        if use_image:
-                            return self.notifier._send_wechat_image(wechat_image_bytes)
+                        if wechat_image_cards and all(
+                            self.notifier._should_use_image_for_channel(
+                                NotificationChannel.WECHAT, image_bytes
+                            )
+                            for image_bytes in wechat_image_cards
+                        ):
+                            logger.info(
+                                "企业微信日报拆分为 %d 张高清卡片发送",
+                                len(wechat_image_cards),
+                            )
+                            return all(
+                                self.notifier._send_wechat_image(image_bytes)
+                                for image_bytes in wechat_image_cards
+                            )
                         return self.notifier.send_to_wechat(dashboard_content)
 
                     wechat_success, wechat_error = _send_channel_safely(

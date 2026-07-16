@@ -849,6 +849,8 @@ The notification channel matrix and `--check-notify` CLI details are documented 
 2. Copy Webhook URL
 3. Set `WECHAT_WEBHOOK_URL`
 
+The group-bot webhook is outbound-only. For in-group stock lookups and confirmed watchlist management without a public callback, see the [WeCom intelligent-bot long-connection guide](wecom-aibot.md).
+
 ### Feishu
 
 > ⚠️ **Key distinction**: `FEISHU_WEBHOOK_SECRET` (webhook signing secret) and `FEISHU_APP_SECRET` (Feishu App Secret) are two completely different configuration variables and cannot be used interchangeably.

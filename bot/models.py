@@ -83,8 +83,16 @@ class BotMessage:
                 '分析': 'analyze',
                 '大盘': 'market',
                 '批量': 'batch',
+                '查': 'quote',
+                '行情': 'quote',
+                '自选': 'watchlist',
+                '常用股': 'watchlist',
                 '帮助': 'help',
                 '状态': 'status',
+                '公告': 'announcements',
+                '新闻': 'announcements',
+                '消息': 'announcements',
+                '业绩': 'announcements',
             }
             for cn_cmd, en_cmd in chinese_commands.items():
                 if text.startswith(cn_cmd):

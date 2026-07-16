@@ -1157,6 +1157,21 @@ def start_bot_stream_clients(config: Config) -> None:
         except Exception as exc:
             logger.error(f"[Main] Failed to start Feishu Stream client: {exc}")
 
+    # 企业微信智能机器人 API 长连接：适用于群内消息收发，不需要公网回调 URL。
+    if getattr(config, 'wecom_aibot_enabled', False):
+        try:
+            from bot.platforms import start_wecom_aibot_background, WECOM_AIBOT_SDK_AVAILABLE
+            if WECOM_AIBOT_SDK_AVAILABLE:
+                if start_wecom_aibot_background():
+                    logger.info("[Main] WeCom AI Bot client started in background.")
+                else:
+                    logger.warning("[Main] WeCom AI Bot client failed to start.")
+            else:
+                logger.warning("[Main] WeCom AI Bot enabled but SDK is missing.")
+                logger.warning("[Main] Run: pip install wecom-aibot-sdk==1.0.8")
+        except Exception as exc:
+            logger.error(f"[Main] Failed to start WeCom AI Bot client: {exc}")
+
 
 def _resolve_scheduled_stock_codes(stock_codes: Optional[List[str]]) -> Optional[List[str]]:
     """Scheduled runs should always read the latest persisted watchlist."""

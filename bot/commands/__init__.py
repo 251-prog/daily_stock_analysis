@@ -18,6 +18,9 @@ from bot.commands.chat import ChatCommand
 from bot.commands.research import ResearchCommand
 from bot.commands.strategies import StrategiesCommand
 from bot.commands.history import HistoryCommand
+from bot.commands.quote import QuoteCommand
+from bot.commands.watchlist import WatchlistCommand
+from bot.commands.announcements import AnnouncementsCommand
 
 # All available commands (for auto-registration)
 ALL_COMMANDS = [
@@ -31,6 +34,9 @@ ALL_COMMANDS = [
     ResearchCommand,
     StrategiesCommand,
     HistoryCommand,
+    QuoteCommand,
+    WatchlistCommand,
+    AnnouncementsCommand,
 ]
 
 __all__ = [
@@ -45,5 +51,8 @@ __all__ = [
     'ResearchCommand',
     'StrategiesCommand',
     'HistoryCommand',
+    'QuoteCommand',
+    'WatchlistCommand',
+    'AnnouncementsCommand',
     'ALL_COMMANDS',
 ]

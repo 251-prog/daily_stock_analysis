@@ -120,6 +120,44 @@ class CommandDispatcher:
 
         # 回调函数：获取帮助命令的命令列表
         self._help_command_getter: Optional[Callable] = None
+        self._last_stock_by_scope: Dict[tuple[str, str, str], str] = {}
+
+    _A_SHARE_IN_TEXT = re.compile(
+        r"(?<!\d)((?:[036]\d{5}|(?:43|83|87|88|92)\d{4}))(?!\d)"
+    )
+    _ANNOUNCEMENT_QUESTION = re.compile(
+        r"公告|新闻|消息|业绩|财报|预告|快报|净利润"
+    )
+    _ANNOUNCEMENT_INTERPRETATION = re.compile(
+        r"怎么看|如何看|为什么|原因|影响|解读|利好|利空|意味着|是否|靠谱吗"
+    )
+
+    @staticmethod
+    def _context_scope(message: BotMessage) -> tuple[str, str, str]:
+        return (message.platform, message.user_id, message.chat_id or "")
+
+    def _remember_explicit_stock(self, message: BotMessage) -> Optional[str]:
+        from src.agent.stock_scope import extract_stock_codes
+
+        candidates = extract_stock_codes(message.content or "")
+        if not candidates:
+            return None
+        code = candidates[0]
+        self._last_stock_by_scope[self._context_scope(message)] = code
+        return code
+
+    def _resolve_lightweight_announcement_route(
+        self, message: BotMessage, explicit_code: Optional[str]
+    ) -> Optional[tuple[str, List[str]]]:
+        text = message.content or ""
+        if not self._ANNOUNCEMENT_QUESTION.search(text):
+            return None
+        if self._ANNOUNCEMENT_INTERPRETATION.search(text):
+            return None
+        code = explicit_code or self._last_stock_by_scope.get(self._context_scope(message))
+        if not code:
+            return None
+        return "announcements", [code]
 
     def register(self, command: BotCommand) -> None:
         """
@@ -266,7 +304,22 @@ class CommandDispatcher:
                 f"请求过于频繁，请 {remaining_time} 秒后再试"
             )
 
+        explicit_code = self._remember_explicit_stock(message)
         cmd_name, args = message.get_command_and_args(self.command_prefix)
+        if cmd_name is None:
+            # A naked stock code is intentionally a quick quote lookup rather
+            # than an AI analysis.  This keeps group-chat exploration cheap.
+            from bot.commands.quote import is_supported_stock_code
+
+            raw_code = message.content.strip()
+            if is_supported_stock_code(raw_code):
+                cmd_name, args = "quote", [raw_code]
+        if cmd_name is None:
+            announcement_route = self._resolve_lightweight_announcement_route(
+                message, explicit_code
+            )
+            if announcement_route is not None:
+                cmd_name, args = announcement_route
         if cmd_name is None:
             return None, args, None, None
 
@@ -284,6 +337,11 @@ class CommandDispatcher:
 
         error_msg = command.validate_args(args)
         if error_msg:
+            # Natural questions can begin with command-like Chinese words,
+            # e.g. “业绩怎么看” or “分析思路为什么…”. Route these to the
+            # bounded Q&A path instead of returning a misleading usage error.
+            if message.mentioned and not message.content.lstrip().startswith(self.command_prefix):
+                return None, [], None, None
             return cmd_name, args, None, BotResponse.error_response(
                 f"{error_msg}\n用法: `{command.usage}`"
             )
@@ -300,6 +358,9 @@ class CommandDispatcher:
             nl_result = self._try_nl_routing_sync(message)
             if nl_result is not None:
                 return nl_result
+            lightweight_result = self._try_lightweight_chat_routing_sync(message)
+            if lightweight_result is not None:
+                return lightweight_result
             if message.mentioned:
                 return BotResponse.text_response(
                     "你好！我是股票分析助手。\n"
@@ -338,6 +399,9 @@ class CommandDispatcher:
             nl_result = await self._try_nl_routing(message)
             if nl_result is not None:
                 return nl_result
+            lightweight_result = await self._try_lightweight_chat_routing(message)
+            if lightweight_result is not None:
+                return lightweight_result
             # No NL match — check if @mentioned for a help hint
             if message.mentioned:
                 return BotResponse.text_response(
@@ -374,6 +438,57 @@ class CommandDispatcher:
     # ------------------------------------------------------------------ #
     #  Natural language routing (LLM-based)                              #
     # ------------------------------------------------------------------ #
+
+    def _prepare_lightweight_chat(self, message: BotMessage) -> Optional[tuple[BotCommand, str]]:
+        """Prepare bounded stock Q&A without enabling the autonomous Agent."""
+        is_private = message.chat_type.value == "private"
+        if not is_private and not message.mentioned:
+            return None
+
+        text = (message.content or "").strip()
+        if not text or len(text) > 800:
+            return None
+
+        scope = self._context_scope(message)
+        from src.agent.stock_scope import extract_stock_codes
+
+        explicit_codes = extract_stock_codes(text)
+        stock_code = explicit_codes[0] if explicit_codes else None
+        if not stock_code and self._passes_nl_prefilter(text):
+            stock_code = self._resolve_stock_code_from_text(text)
+        if stock_code:
+            self._last_stock_by_scope[scope] = stock_code
+        else:
+            stock_code = self._last_stock_by_scope.get(scope)
+
+        message.raw_data = dict(message.raw_data or {})
+        if stock_code:
+            message.raw_data["lightweight_stock_code"] = stock_code
+
+        command = self.get_command("chat")
+        if command is None:
+            return None
+        return command, text
+
+    async def _try_lightweight_chat_routing(
+        self, message: BotMessage
+    ) -> Optional[BotResponse]:
+        prepared = self._prepare_lightweight_chat(message)
+        if prepared is None:
+            return None
+        command, text = prepared
+        logger.info("[Dispatcher] lightweight Q&A → /chat: %s", text[:60])
+        return await command.execute_async(message, [text])
+
+    def _try_lightweight_chat_routing_sync(
+        self, message: BotMessage
+    ) -> Optional[BotResponse]:
+        prepared = self._prepare_lightweight_chat(message)
+        if prepared is None:
+            return None
+        command, text = prepared
+        logger.info("[Dispatcher] lightweight Q&A → /chat: %s", text[:60])
+        return command.execute(message, [text])
 
     # Lightweight intent-parsing prompt.  Asks the LLM to output a small
     # JSON object so we can route to the right command.
